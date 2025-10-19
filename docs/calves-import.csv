@@ -1,0 +1,4 @@
+calf_id,birth_date,sex,dam_id,birth_weight,health_status,status,batch_id
+FARM001-2024-001,2024-01-15,female,DAM123,45.5,healthy,active,1
+FARM001-2024-002,2024-01-16,male,DAM124,42.0,healthy,active,1
+FARM001-2024-003,2024-01-17,female,DAM125,47.2,needs_attention,active,2
