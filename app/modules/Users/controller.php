@@ -111,7 +111,7 @@ class UsersController {
         }
         
         // Don't allow deleting your own account or the main admin
-        if ($user['id'] != $_SESSION['user_id'] && $user['email'] != 'admin@easycalf.com') {
+        if ((int) $user['id'] !== (int) $_SESSION['user_id'] && (int) $user['id'] !== 1) {
             $actions .= '
             <form method="post" action="/admin/delete" style="display: inline; margin-left: 0.5rem;">
                 <input type="hidden" name="user_id" value="' . $user['id'] . '">
@@ -151,8 +151,8 @@ class UsersController {
         if ($_POST['user_id']) {
             $user = $this->db->fetch("SELECT email FROM users WHERE id = ?", [$_POST['user_id']]);
             
-            // Prevent deleting the main admin account
-            if ($user && $user['email'] != 'admin@easycalf.com') {
+            // Keep the original administrator account (the first user created at install).
+            if ($user && (int) $user['id'] !== 1) {
                 $this->db->query("DELETE FROM users WHERE id = ?", [$_POST['user_id']]);
             }
         }

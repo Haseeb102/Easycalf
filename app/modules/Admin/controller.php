@@ -17,52 +17,40 @@ class AdminController {
         $success = false;
         $error = null;
 
+        $displayEnabled = defined('PUBLIC_ACCESS_ENABLED') && PUBLIC_ACCESS_ENABLED;
+        $displayCode = defined('PUBLIC_ACCESS_CODE') ? (string) PUBLIC_ACCESS_CODE : '';
+
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
-                $enabled = isset($_POST['public_access']) ? true : false;
+                require_once BASE_PATH . '/app/config/env.php';
+                $enabled = isset($_POST['public_access']);
                 $accessCode = trim($_POST['access_code'] ?? '');
-                
-                // Update the public_access.php file
-                $configContent = "<?php
-/**
- * Public Access Configuration
- */
-define('PUBLIC_ACCESS_ENABLED', " . ($enabled ? 'true' : 'false') . ");
-define('PUBLIC_ACCESS_CODE', " . (!empty($accessCode) ? "'" . addslashes($accessCode) . "'" : "''") . ");
-define('PUBLIC_USER_ID', 1);
-define('PUBLIC_USER_NAME', 'Public Viewer');
-define('PUBLIC_USER_EMAIL', 'public@easycalf.com');
-define('PUBLIC_USER_ROLE', 'user');
-define('PUBLIC_ACCESS_RESTRICTIONS', [
-    'admin_pages' => true,
-    'user_management' => true,
-    'settings' => true,
-    'delete_operations' => true,
-    'export_data' => false
-]);
-?>";
-                
-                if (file_put_contents(BASE_PATH . '/app/config/public_access.php', $configContent) === false) {
-                    throw new Exception("Failed to update configuration file");
-                }
-                
+
+                // Keep this value in the local configuration file, not in committed PHP.
+                easycalf_env_set([
+                    'PUBLIC_ACCESS_ENABLED' => $enabled ? 'true' : 'false',
+                    'PUBLIC_ACCESS_CODE' => $accessCode,
+                ]);
+
+                $displayEnabled = $enabled;
+                $displayCode = $accessCode;
                 $success = true;
                 $_SESSION['success_message'] = "Public access settings updated successfully!";
-                
-                // Clear opcache if enabled
-                if (function_exists('opcache_reset')) {
-                    opcache_reset();
-                }
-                
             } catch (Exception $e) {
                 $error = $e->getMessage();
             }
         }
 
-        $this->renderPublicAccessSettings($success, $error);
+        $this->renderPublicAccessSettings($success, $error, $displayEnabled, $displayCode);
     }
 
-    private function renderPublicAccessSettings($success, $error) {
+    private function renderPublicAccessSettings($success, $error, $displayEnabled = null, $displayCode = null) {
+        if ($displayEnabled === null) {
+            $displayEnabled = defined('PUBLIC_ACCESS_ENABLED') && PUBLIC_ACCESS_ENABLED;
+        }
+        if ($displayCode === null) {
+            $displayCode = defined('PUBLIC_ACCESS_CODE') ? (string) PUBLIC_ACCESS_CODE : '';
+        }
         require_once BASE_PATH . '/app/core/ModernNavbar.php';
         $navbar = new ModernNavbar();
         ?>
@@ -105,11 +93,11 @@ define('PUBLIC_ACCESS_RESTRICTIONS', [
             <form method="post">
                 <div class="toggle-switch">
                     <label class="switch">
-                        <input type="checkbox" name="public_access" <?php echo PUBLIC_ACCESS_ENABLED ? 'checked' : ''; ?>>
+                        <input type="checkbox" name="public_access" <?php echo $displayEnabled ? 'checked' : ''; ?>>
                         <span class="slider"></span>
                     </label>
                     <span style="font-weight: 600; font-size: 1.1rem;">
-                        <?php echo PUBLIC_ACCESS_ENABLED ? 'Public Access: ON' : 'Public Access: OFF'; ?>
+                        <?php echo $displayEnabled ? 'Public Access: ON' : 'Public Access: OFF'; ?>
                     </span>
                 </div>
                 
@@ -118,7 +106,7 @@ define('PUBLIC_ACCESS_RESTRICTIONS', [
                         Access Code (optional):
                     </label>
                     <input type="text" name="access_code" class="form-control" 
-                           value="<?php echo htmlspecialchars(PUBLIC_ACCESS_CODE); ?>" 
+                           value="<?php echo htmlspecialchars($displayCode); ?>" 
                            placeholder="Leave empty for fully public access">
                     <small style="color: #666; display: block; margin-top: 0.5rem;">
                         If set, users will need to enter this code to access the system
@@ -127,10 +115,10 @@ define('PUBLIC_ACCESS_RESTRICTIONS', [
                 
                 <div style="background: #e7f3ff; padding: 1rem; border-radius: 8px; margin: 1.5rem 0;">
                     <strong>Current Status:</strong><br>
-                    <?php if (PUBLIC_ACCESS_ENABLED): ?>
+                    <?php if ($displayEnabled): ?>
                         ✅ System is <strong>PUBLIC</strong> - Anyone can access without login
-                        <?php if (!empty(PUBLIC_ACCESS_CODE)): ?>
-                            <br>🔐 Access code required: <code><?php echo htmlspecialchars(PUBLIC_ACCESS_CODE); ?></code>
+                        <?php if (!empty($displayCode)): ?>
+                            <br>🔐 Access code required: <code><?php echo htmlspecialchars($displayCode); ?></code>
                         <?php else: ?>
                             <br>🌍 Fully open - No access code required
                         <?php endif; ?>

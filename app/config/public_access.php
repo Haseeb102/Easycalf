@@ -8,13 +8,18 @@
  * For security, public access can be configured to auto-disable after 24 hours
  */
 
-// Toggle this to enable/disable public access (can be overridden by environment variable)
-$publicAccessEnabled = $_ENV['PUBLIC_ACCESS_ENABLED'] ?? getenv('PUBLIC_ACCESS_ENABLED') ?: 'false';
+if (!function_exists('easycalf_env')) {
+    require_once __DIR__ . '/env.php';
+    easycalf_load_env();
+}
+
+// Toggle public access from the environment or the local configuration file.
+$publicAccessEnabled = easycalf_env('PUBLIC_ACCESS_ENABLED', 'false');
 define('PUBLIC_ACCESS_ENABLED', $publicAccessEnabled === 'true' || $publicAccessEnabled === '1');
 
-// Optional: Set a secret access code for semi-public access
-// Leave empty for fully public, or set a code like 'demo123'
-define('PUBLIC_ACCESS_CODE', $_ENV['PUBLIC_ACCESS_CODE'] ?? getenv('PUBLIC_ACCESS_CODE') ?: '');
+// Optional access code for semi-public access. Leave empty for fully public access.
+// Store the value in the environment or the local configuration file, not in git.
+define('PUBLIC_ACCESS_CODE', easycalf_env('PUBLIC_ACCESS_CODE', ''));
 
 // Public access user (used for tracking when public access is enabled)
 define('PUBLIC_USER_ID', $_ENV['PUBLIC_USER_ID'] ?? getenv('PUBLIC_USER_ID') ?: 1);

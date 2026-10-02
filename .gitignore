@@ -1,0 +1,8 @@
+# Local configuration. May contain database credentials. Never commit.
+.env
+.env.local
+*.env
+!*.env.example
+
+app/config/local.php
+app/config/*.local.php

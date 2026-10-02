@@ -27,15 +27,20 @@ spl_autoload_register(function ($class) {
 });
 
 
-// Enable verbose errors during development (remove or toggle in production)
+// Verbose errors stay off unless APP_DEBUG is explicitly enabled.
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('log_errors', '1');
 
 // Base path points to project root (one level above public/)
 define('BASE_PATH', dirname(__DIR__));
 
 try {
+    require_once BASE_PATH . '/app/config/env.php';
+    easycalf_load_env();
+    easycalf_configure_error_display();
+
     // =====================================================
     // AUTOLOAD CORE FILES (these files must exist in app/config and app/core)
     // =====================================================
@@ -189,15 +194,19 @@ try {
             (new CalvesController())->import();
             break;
 
-        // Debug routes (remove in production)
+        // Debug routes. Closed unless APP_DEBUG is explicitly enabled.
         case 'calves/debug-bulk-delete':
-            require_once BASE_PATH . '/app/modules/Calves/controller.php';
-            (new CalvesController())->debugBulkDelete();
-            break;
-
         case 'calves/verify-deletes':
+            if (!easycalf_debug_enabled()) {
+                http_response_code(404);
+                exit;
+            }
             require_once BASE_PATH . '/app/modules/Calves/controller.php';
-            (new CalvesController())->verifyDeletes();
+            if ($path === 'calves/debug-bulk-delete') {
+                (new CalvesController())->debugBulkDelete();
+            } else {
+                (new CalvesController())->verifyDeletes();
+            }
             break;
 
         // BATCHES
@@ -467,37 +476,30 @@ case 'settings/permanent-delete':
             (new AdminController())->publicAccessToggle();
             break;
 
-        // MIGRATION and DEBUG routes (for maintenance; remove/disable in production)
+        // Maintenance routes. Closed unless APP_DEBUG is explicitly enabled.
         case 'migrate-profile':
-            require_once BASE_PATH . '/public/migrate_profile.php';
-            break;
-
         case 'migrate-feeding-times':
-            require_once BASE_PATH . '/public/migrate_feeding_times.php';
-            break;
-
         case 'migrate-calf-passport':
-            require_once BASE_PATH . '/public/migrate_calf_passport.php';
-            break;
-
         case 'migrate-weaning-settings':
-            require_once BASE_PATH . '/public/migrate_weaning_settings.php';
-            break;
-
         case 'test-design':
-            require_once BASE_PATH . '/public/test-design.php';
-            break;
-
         case 'debug-navbar':
-            require_once BASE_PATH . '/public/debug-navbar.php';
-            break;
-
         case 'test-delete':
-            require_once BASE_PATH . '/public/test-delete.php';
-            break;
-
         case 'fix_calf_status':
-            require_once BASE_PATH . '/public/fix_calf_status.php';
+            if (!easycalf_debug_enabled()) {
+                http_response_code(404);
+                exit;
+            }
+            $maintenanceFiles = [
+                'migrate-profile' => '/public/migrate_profile.php',
+                'migrate-feeding-times' => '/public/migrate_feeding_times.php',
+                'migrate-calf-passport' => '/public/migrate_calf_passport.php',
+                'migrate-weaning-settings' => '/public/migrate_weaning_settings.php',
+                'test-design' => '/public/test-design.php',
+                'debug-navbar' => '/public/debug-navbar.php',
+                'test-delete' => '/public/test-delete.php',
+                'fix_calf_status' => '/public/fix_calf_status.php',
+            ];
+            require_once BASE_PATH . $maintenanceFiles[$path];
             break;
 
         // DEFAULT / FALLBACK - allow static files and show custom 404 for missing routes
@@ -586,16 +588,19 @@ case 'settings/permanent-delete':
             <h1 class='error-title'>Application Error</h1>
             <p style='text-align:center;'>Sorry, something went wrong. Path: {$displayPath}</p>";
 
-    if (ini_get('display_errors')) {
+    $showDetail = $e instanceof EasyCalfConfigException || (defined('APP_DEBUG') && APP_DEBUG);
+    if ($showDetail) {
         echo "<div class='error-message'>
                 <strong>Error:</strong> " . htmlspecialchars($e->getMessage()) . "
               </div>";
-        echo "<div class='debug-info'>
-                <strong>File:</strong> " . htmlspecialchars($e->getFile()) . " (Line " . $e->getLine() . ")\n\n"
-             . htmlspecialchars($e->getTraceAsString()) . "
-              </div>";
+        if (defined('APP_DEBUG') && APP_DEBUG) {
+            echo "<div class='debug-info'>
+                    <strong>File:</strong> " . htmlspecialchars($e->getFile()) . " (Line " . $e->getLine() . ")\n\n"
+                 . htmlspecialchars($e->getTraceAsString()) . "
+                  </div>";
+        }
     } else {
-        echo "<p style='text-align:center;'>Enable display_errors to see details during development.</p>";
+        echo "<p style='text-align:center;'>Something went wrong. The details were written to the server error log.</p>";
     }
 
     echo "<div style='text-align:center; margin-top:1rem;'>

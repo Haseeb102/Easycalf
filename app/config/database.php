@@ -1,17 +1,20 @@
 <?php
-// Database Configuration
-// Uses environment variables for security. Set these in .env file.
+require_once __DIR__ . '/env.php';
 
-// Load from environment variables or use defaults (for backward compatibility)
-define('DB_HOST', $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: 'sql308.infinityfree.com');
-define('DB_NAME', $_ENV['DB_NAME'] ?? getenv('DB_NAME') ?: 'if0_40088584_easycalf');
-define('DB_USER', $_ENV['DB_USER'] ?? getenv('DB_USER') ?: 'if0_40088584');
-define('DB_PASS', $_ENV['DB_PASS'] ?? getenv('DB_PASS') ?: 'WuAKQnERk2H');
-define('DB_CHARSET', $_ENV['DB_CHARSET'] ?? getenv('DB_CHARSET') ?: 'utf8mb4');
+easycalf_load_env();
+easycalf_require_settings(['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASS']);
 
-// Application Settings
-define('APP_NAME', $_ENV['APP_NAME'] ?? getenv('APP_NAME') ?: 'EasyCalf');
-define('APP_VERSION', $_ENV['APP_VERSION'] ?? getenv('APP_VERSION') ?: '1.0');
-define('BASE_URL', $_ENV['BASE_URL'] ?? getenv('BASE_URL') ?: 'http://easycalf.free.nf');
-define('UPLOAD_PATH', $_ENV['UPLOAD_PATH'] ?? getenv('UPLOAD_PATH') ?: __DIR__ . '/../storage/uploads/');
-?>
+if (!defined('APP_DEBUG')) {
+    define('APP_DEBUG', easycalf_env_flag('APP_DEBUG'));
+}
+
+define('DB_HOST', easycalf_env('DB_HOST'));
+define('DB_NAME', easycalf_env('DB_NAME'));
+define('DB_USER', easycalf_env('DB_USER'));
+define('DB_PASS', easycalf_env('DB_PASS'));
+define('DB_CHARSET', easycalf_env('DB_CHARSET', 'utf8mb4'));
+
+define('APP_NAME', easycalf_env('APP_NAME', 'EasyCalf'));
+define('APP_VERSION', easycalf_env('APP_VERSION', '1.0'));
+define('BASE_URL', easycalf_env('BASE_URL', ''));
+define('UPLOAD_PATH', easycalf_env('UPLOAD_PATH', __DIR__ . '/../storage/uploads/'));
