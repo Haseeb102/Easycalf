@@ -1,120 +1,167 @@
 <?php
-// Error reporting for debugging
+// Verbose errors stay off unless APP_DEBUG is explicitly enabled.
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('log_errors', '1');
 
-// Check if already installed
-$config_file = '../app/config/database.php';
-if (file_exists($config_file)) {
-    echo "<script>alert('EasyCalf is already installed. Redirecting to main app...'); window.location.href = '../';</script>";
-    exit;
+$projectRoot = dirname(__DIR__);
+require_once $projectRoot . '/app/config/env.php';
+easycalf_load_env();
+easycalf_configure_error_display();
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+if (empty($_SESSION['install_token'])) {
+    $_SESSION['install_token'] = bin2hex(random_bytes(16));
 }
 
 $error = null;
 $success = false;
-$debug_info = [];
+$configPath = null;
+$debugInfo = [];
 
-// Create necessary directories
-$debug_info[] = "Creating directory structure...";
-$dirs_to_create = [
-    '../app/config',
-    '../app/storage/uploads', 
-    '../app/storage/backups',
-    '../app/core',
-    '../app/modules'
-];
-
-foreach ($dirs_to_create as $dir) {
-    if (!is_dir($dir)) {
-        if (mkdir($dir, 0755, true)) {
-            $debug_info[] = "✅ Created directory: $dir";
-        } else {
-            $debug_info[] = "❌ Failed to create directory: $dir";
-        }
-    } else {
-        $debug_info[] = "✅ Directory exists: $dir";
+function install_debug(array &$debugInfo, string $line): void
+{
+    if (easycalf_debug_enabled()) {
+        $debugInfo[] = $line;
     }
 }
 
-if ($_POST['install']) {
-    $db_host = 'sql308.infinityfree.com';
-    $db_name = 'if0_40088584_easycalf';
-    $db_user = 'if0_40088584';
-    $db_pass = 'WuAKQnERk2H';
-    
-    try {
-        $debug_info[] = "Testing database connection...";
-        
-        // Test database connection
-        $pdo = new PDO("mysql:host=$db_host;dbname=$db_name", $db_user, $db_pass);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $debug_info[] = "✅ Database connection successful";
-        
-        // Import schema
-        $debug_info[] = "Reading schema file...";
-        $schema_file = '../database/schema.sql';
-        if (!file_exists($schema_file)) {
-            throw new Exception("Schema file not found: " . $schema_file);
-        }
-        
-        $schema = file_get_contents($schema_file);
-        $debug_info[] = "✅ Schema file loaded (" . strlen($schema) . " bytes)";
-        
-        // Split schema into individual queries
-        $queries = array_filter(array_map('trim', explode(';', $schema)));
-        $debug_info[] = "Executing " . count($queries) . " SQL queries...";
-        
-        $tables_created = 0;
-        foreach ($queries as $query) {
-            if (!empty($query)) {
-                $pdo->exec($query);
-                if (strpos($query, 'CREATE TABLE') !== false) {
-                    $tables_created++;
-                }
+function install_valid_identifier(string $value): bool
+{
+    return $value !== '' && (bool) preg_match('/^[A-Za-z0-9._:-]+$/', $value);
+}
+
+function install_run_sql_file(PDO $pdo, string $path): void
+{
+    if (!is_file($path)) {
+        throw new RuntimeException('A required SQL file is missing.');
+    }
+
+    $sql = file_get_contents($path);
+    if ($sql === false) {
+        throw new RuntimeException('Could not read a required SQL file.');
+    }
+
+    $statements = array_filter(array_map('trim', explode(';', $sql)), function ($query) {
+        foreach (preg_split('/\R/', $query) as $line) {
+            $line = trim($line);
+            if ($line !== '' && !str_starts_with($line, '--')) {
+                return true;
             }
         }
-        $debug_info[] = "✅ Database schema imported ($tables_created tables created)";
-        
-        // Create config file
-        $debug_info[] = "Creating configuration file...";
-        $configContent = "<?php
-// Database Configuration for InfinityFree
-define('DB_HOST', 'sql308.infinityfree.com');
-define('DB_NAME', 'if0_40088584_easycalf');
-define('DB_USER', 'if0_40088584');
-define('DB_PASS', 'WuAKQnERk2H');
-define('DB_CHARSET', 'utf8mb4');
+        return false;
+    });
 
-// Application Settings
-define('APP_NAME', 'EasyCalf');
-define('APP_VERSION', '1.0');
-define('BASE_URL', 'http://easycalf.free.nf');
-define('UPLOAD_PATH', __DIR__ . '/../storage/uploads/');
-?>
-";
-        
-        if (file_put_contents($config_file, $configContent) === false) {
-            throw new Exception("Failed to write config file: " . $config_file);
-        }
-        $debug_info[] = "✅ Configuration file created";
-        
-        $success = true;
-        $debug_info[] = "🎉 Installation completed successfully!";
-        
-    } catch (PDOException $e) {
-        $error = "Database connection failed: " . $e->getMessage();
-        $debug_info[] = "❌ Database error: " . $e->getMessage();
-    } catch (Exception $e) {
-        $error = "Installation failed: " . $e->getMessage();
-        $debug_info[] = "❌ Installation error: " . $e->getMessage();
+    foreach ($statements as $query) {
+        $pdo->exec($query);
     }
 }
 
-// Display current PHP info for debugging
-$debug_info[] = "PHP Version: " . PHP_VERSION;
-$debug_info[] = "Current directory: " . getcwd();
-$debug_info[] = "Config file path: " . realpath($config_file);
-$debug_info[] = "Config file exists: " . (file_exists($config_file) ? 'Yes' : 'No');
+if (easycalf_config_is_complete()) {
+    $alreadyInstalled = true;
+} else {
+    $alreadyInstalled = false;
+}
+
+if (!$alreadyInstalled && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $token = $_POST['install_token'] ?? '';
+    if (!is_string($token) || !hash_equals($_SESSION['install_token'], $token)) {
+        $error = 'The installation form expired. Reload the page and try again.';
+    } else {
+        $dbHost = trim((string) ($_POST['db_host'] ?? ''));
+        $dbName = trim((string) ($_POST['db_name'] ?? ''));
+        $dbUser = trim((string) ($_POST['db_user'] ?? ''));
+        $dbPass = (string) ($_POST['db_pass'] ?? '');
+        $baseUrl = trim((string) ($_POST['base_url'] ?? ''));
+        $adminName = trim((string) ($_POST['admin_name'] ?? ''));
+        $adminEmail = trim((string) ($_POST['admin_email'] ?? ''));
+        $adminPassword = (string) ($_POST['admin_password'] ?? '');
+        $adminPasswordConfirm = (string) ($_POST['admin_password_confirm'] ?? '');
+
+        if (!install_valid_identifier($dbHost) || !install_valid_identifier($dbName) || !install_valid_identifier($dbUser)) {
+            $error = 'Enter a database host, name, and user. Use only letters, numbers, dots, hyphens, and underscores.';
+        } elseif ($dbPass === '') {
+            $error = 'Enter the database password. It is not stored in the application code.';
+        } elseif ($adminName === '' || strlen($adminName) > 100) {
+            $error = 'Enter an administrator name.';
+        } elseif (!filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) {
+            $error = 'Enter a valid administrator email address.';
+        } elseif (strlen($adminPassword) < 8) {
+            $error = 'Choose an administrator password of at least 8 characters.';
+        } elseif (!hash_equals($adminPassword, $adminPasswordConfirm)) {
+            $error = 'The administrator passwords do not match.';
+        } else {
+            try {
+                install_debug($debugInfo, 'Testing database connection...');
+                $dsn = 'mysql:host=' . $dbHost . ';dbname=' . $dbName . ';charset=utf8mb4';
+                $pdo = new PDO($dsn, $dbUser, $dbPass, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                ]);
+                install_debug($debugInfo, 'Database connection succeeded.');
+
+                foreach ([$projectRoot . '/app/storage/uploads', $projectRoot . '/app/storage/backups'] as $dir) {
+                    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+                        throw new RuntimeException('Could not create a storage directory.');
+                    }
+                }
+
+                install_debug($debugInfo, 'Importing database schema...');
+                install_run_sql_file($pdo, $projectRoot . '/database/schema.sql');
+
+                $passwordHash = password_hash($adminPassword, PASSWORD_DEFAULT);
+                if ($passwordHash === false) {
+                    throw new RuntimeException('Could not hash the administrator password.');
+                }
+
+                $insert = $pdo->prepare(
+                    'INSERT INTO `users` (`name`, `email`, `password`, `role`, `status`, `approved_at`)
+                     VALUES (?, ?, ?, \'admin\', \'active\', NOW())'
+                );
+                $insert->execute([$adminName, $adminEmail, $passwordHash]);
+                unset($adminPassword, $adminPasswordConfirm, $passwordHash);
+
+                install_debug($debugInfo, 'Importing default records...');
+                install_run_sql_file($pdo, $projectRoot . '/database/seed.sql');
+
+                $configPath = easycalf_env_set([
+                    'DB_HOST' => $dbHost,
+                    'DB_NAME' => $dbName,
+                    'DB_USER' => $dbUser,
+                    'DB_PASS' => $dbPass,
+                    'DB_CHARSET' => 'utf8mb4',
+                    'APP_NAME' => 'EasyCalf',
+                    'APP_VERSION' => '1.0',
+                    'BASE_URL' => $baseUrl,
+                    'APP_DEBUG' => 'false',
+                ]);
+                unset($dbPass);
+
+                $success = true;
+                $_SESSION['install_token'] = bin2hex(random_bytes(16));
+                install_debug($debugInfo, 'Installation finished.');
+            } catch (EasyCalfConfigException $e) {
+                $error = $e->getMessage();
+                install_debug($debugInfo, $e->getMessage());
+            } catch (PDOException $e) {
+                error_log('EasyCalf install database error: ' . $e->getMessage());
+                $error = 'Database setup failed. Check the host, database name, user, and password, and that the database already exists.';
+                if (easycalf_debug_enabled()) {
+                    $error .= ' ' . $e->getMessage();
+                }
+                install_debug($debugInfo, $e->getMessage());
+            } catch (Throwable $e) {
+                error_log('EasyCalf install error: ' . $e->getMessage());
+                $error = 'Installation failed. ' . $e->getMessage();
+                install_debug($debugInfo, $e->getMessage());
+            }
+        }
+
+        unset($dbPass, $adminPassword, $adminPasswordConfirm);
+    }
+}
 ?>
 <!DOCTYPE html>
 <html>
@@ -122,7 +169,7 @@ $debug_info[] = "Config file exists: " . (file_exists($config_file) ? 'Yes' : 'N
     <title>Install EasyCalf</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #007AFF, #5856D6);
             min-height: 100vh;
@@ -136,42 +183,22 @@ $debug_info[] = "Config file exists: " . (file_exists($config_file) ? 'Yes' : 'N
             max-width: 800px;
             margin: 0 auto;
         }
-        h1 { 
-            color: #007AFF; 
-            margin-bottom: 1rem;
-            text-align: center;
-        }
-        .success { 
-            background: #d4edda; 
-            color: #155724; 
-            padding: 1rem; 
-            border-radius: 8px; 
-            margin: 1rem 0; 
-        }
-        .error { 
-            background: #f8d7da; 
-            color: #721c24; 
-            padding: 1rem; 
-            border-radius: 8px; 
-            margin: 1rem 0; 
-        }
-        .info { 
-            background: #d1ecf1; 
-            color: #0c5460; 
-            padding: 1rem; 
-            border-radius: 8px; 
-            margin: 1rem 0; 
-        }
-        .debug { 
-            background: #f8f9fa; 
-            color: #333; 
-            padding: 1rem; 
-            border-radius: 8px; 
+        h1 { color: #007AFF; margin-bottom: 1rem; text-align: center; }
+        .success, .error, .info {
+            padding: 1rem;
+            border-radius: 8px;
             margin: 1rem 0;
-            font-family: monospace;
-            font-size: 0.9rem;
-            max-height: 300px;
-            overflow-y: auto;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        label { display: block; font-weight: 600; margin: 0.8rem 0 0.3rem; }
+        input[type="text"], input[type="password"], input[type="email"] {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 1rem;
         }
         .btn {
             background: #007AFF;
@@ -183,93 +210,90 @@ $debug_info[] = "Config file exists: " . (file_exists($config_file) ? 'Yes' : 'N
             cursor: pointer;
             width: 100%;
             margin-top: 1rem;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
         }
         .btn:hover { background: #0056cc; }
-        .db-info {
+        .debug {
             background: #f8f9fa;
+            color: #333;
             padding: 1rem;
             border-radius: 8px;
             margin: 1rem 0;
+            font-family: monospace;
+            font-size: 0.9rem;
         }
-        .debug-line {
-            margin: 0.25rem 0;
-            padding: 0.25rem;
-            border-left: 4px solid transparent;
-        }
-        .debug-line.success { border-left-color: #28a745; background: #f8fff9; }
-        .debug-line.error { border-left-color: #dc3545; background: #fff5f5; }
-        .debug-line.info { border-left-color: #17a2b8; background: #f8fdff; }
     </style>
 </head>
 <body>
     <div class="install-container">
         <h1>EasyCalf Installation</h1>
-        
-        <!-- Debug Information -->
-        <div class="debug">
-            <h3>Installation Progress:</h3>
-            <?php foreach ($debug_info as $line): ?>
-                <div class="debug-line <?php 
-                    if (strpos($line, '✅') !== false) echo 'success';
-                    elseif (strpos($line, '❌') !== false) echo 'error';
-                    else echo 'info';
-                ?>"><?= htmlspecialchars($line) ?></div>
-            <?php endforeach; ?>
-        </div>
-        
-        <?php if ($success): ?>
+
+        <?php if (easycalf_debug_enabled() && $debugInfo): ?>
+            <div class="debug">
+                <?php foreach ($debugInfo as $line): ?>
+                    <div><?= htmlspecialchars($line) ?></div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if ($alreadyInstalled): ?>
+            <div class="info">
+                <strong>Already configured.</strong><br>
+                Database settings are already present in the environment or the local configuration file.
+                Delete the install directory, then sign in with the administrator account you created.
+            </div>
+        <?php elseif ($success): ?>
             <div class="success">
-                <h3>✅ Installation Successful!</h3>
-                <p>EasyCalf has been successfully installed.</p>
-                <div class="db-info">
-                    <strong>Default Admin Login:</strong><br>
-                    Email: <code>admin@easycalf.com</code><br>
-                    Password: <code>admin123</code>
-                </div>
-                <p><strong>Important:</strong> 
-                   <br>• Change the admin password after first login!
-                   <br>• Delete the install directory for security!
-                </p>
+                <h3>Installation successful</h3>
+                <p>EasyCalf saved the database settings outside the web application code<?php if ($configPath): ?> (<code><?= htmlspecialchars($configPath) ?></code>)<?php endif; ?>.</p>
+                <p>Sign in with the administrator email and password you just chose. There is no default password.</p>
+                <p><strong>Next:</strong> delete or block the install directory. If this file is inside a directory the web server can read, move it further outside the web root and set <code>EASYCALF_ENV_FILE</code> to that path.</p>
             </div>
-            <div style="display: flex; gap: 1rem;">
-                <a href="../" class="btn" style="flex: 1;">Go to EasyCalf</a>
-                <a href="../public/" class="btn" style="flex: 1; background: #28a745;">Go to Public App</a>
-            </div>
-            
+            <a href="../public/" class="btn">Go to EasyCalf</a>
         <?php else: ?>
             <?php if ($error): ?>
-                <div class="error">
-                    <strong>Installation Error:</strong><br>
-                    <?= htmlspecialchars($error) ?>
-                </div>
+                <div class="error"><?= htmlspecialchars($error) ?></div>
             <?php endif; ?>
-            
+
             <div class="info">
-                <strong>Ready to Install</strong><br>
-                Click the button below to install EasyCalf with your database settings.
+                Enter the database you already created, and choose the first administrator account.
+                These values are written to a configuration file outside git. They are not saved in the application source.
             </div>
-            
-            <div class="db-info">
-                <strong>Database Details:</strong><br>
-                Host: <code>sql308.infinityfree.com</code><br>
-                Database: <code>if0_40088584_easycalf</code><br>
-                User: <code>if0_40088584</code>
-            </div>
-            
-            <form method="post">
-                <input type="hidden" name="install" value="1">
-                <button type="submit" class="btn">Install EasyCalf Now</button>
+
+            <form method="post" autocomplete="off">
+                <input type="hidden" name="install_token" value="<?= htmlspecialchars($_SESSION['install_token']) ?>">
+
+                <label for="db_host">Database host</label>
+                <input type="text" id="db_host" name="db_host" required value="<?= htmlspecialchars($_POST['db_host'] ?? '') ?>">
+
+                <label for="db_name">Database name</label>
+                <input type="text" id="db_name" name="db_name" required value="<?= htmlspecialchars($_POST['db_name'] ?? '') ?>">
+
+                <label for="db_user">Database user</label>
+                <input type="text" id="db_user" name="db_user" required value="<?= htmlspecialchars($_POST['db_user'] ?? '') ?>">
+
+                <label for="db_pass">Database password</label>
+                <input type="password" id="db_pass" name="db_pass" required autocomplete="new-password">
+
+                <label for="base_url">Base URL (optional)</label>
+                <input type="text" id="base_url" name="base_url" value="<?= htmlspecialchars($_POST['base_url'] ?? '') ?>" placeholder="https://example.com">
+
+                <label for="admin_name">Administrator name</label>
+                <input type="text" id="admin_name" name="admin_name" required value="<?= htmlspecialchars($_POST['admin_name'] ?? '') ?>">
+
+                <label for="admin_email">Administrator email</label>
+                <input type="email" id="admin_email" name="admin_email" required value="<?= htmlspecialchars($_POST['admin_email'] ?? '') ?>">
+
+                <label for="admin_password">Administrator password</label>
+                <input type="password" id="admin_password" name="admin_password" required minlength="8" autocomplete="new-password">
+
+                <label for="admin_password_confirm">Confirm administrator password</label>
+                <input type="password" id="admin_password_confirm" name="admin_password_confirm" required minlength="8" autocomplete="new-password">
+
+                <button type="submit" class="btn">Install EasyCalf</button>
             </form>
-            
-            <div style="margin-top: 2rem; padding: 1rem; background: #fff3cd; border-radius: 8px;">
-                <strong>Troubleshooting:</strong>
-                <ul style="margin: 0.5rem 0 0 1rem;">
-                    <li>Make sure database exists and user has permissions</li>
-                    <li>Check that all directories are writable</li>
-                    <li>Remove any .htaccess files if causing redirect issues</li>
-                </ul>
-            </div>
-            
         <?php endif; ?>
     </div>
 </body>

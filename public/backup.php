@@ -2,6 +2,24 @@
 // public/backup.php
 // Database backup and restore utility
 
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+error_reporting(E_ALL);
+ini_set('log_errors', '1');
+
+define('BASE_PATH', dirname(__DIR__));
+require_once BASE_PATH . '/app/config/env.php';
+easycalf_load_env();
+easycalf_configure_error_display();
+
+try {
+    require_once BASE_PATH . '/app/config/database.php';
+} catch (EasyCalfConfigException $e) {
+    http_response_code(500);
+    echo htmlspecialchars($e->getMessage());
+    exit;
+}
+
 // Start session
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -25,33 +43,25 @@ if (!empty($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'ad
 }
 
 if (!$isAdmin) {
-    // Debug info - shows what's in your session
     http_response_code(403);
     echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Access Denied</title>';
     echo '<style>body{font-family:Arial;padding:40px;background:#f5f5f5;}';
     echo '.container{background:white;padding:30px;border-radius:8px;max-width:800px;margin:0 auto;box-shadow:0 2px 10px rgba(0,0,0,0.1);}';
-    echo 'h2{color:#d32f2f;}pre{background:#f5f5f5;padding:15px;border-radius:5px;overflow:auto;}';
+    echo 'h2{color:#d32f2f;}';
     echo '.btn{display:inline-block;padding:10px 20px;background:#1976D2;color:white;text-decoration:none;border-radius:5px;margin-top:20px;}';
     echo '</style></head><body><div class="container">';
-    echo '<h2>⛔ Access Denied - Admin Privileges Required</h2>';
-    echo '<p>Your account does not have administrator privileges to access backup/restore features.</p>';
-    echo '<h3>🔍 Session Debug Info:</h3>';
-    echo '<pre>';
-    echo 'user_id: ' . ($_SESSION['user_id'] ?? 'not set') . "\n";
-    echo 'role: ' . ($_SESSION['role'] ?? 'not set') . "\n";
-    echo 'user_role: ' . ($_SESSION['user_role'] ?? 'not set') . "\n\n";
-    echo 'All session data:' . "\n";
-    print_r($_SESSION);
-    echo '</pre>';
-    echo '<p><strong>Note:</strong> To use backup/restore, your session must have either <code>role</code> or <code>user_role</code> set to "admin".</p>';
-    echo '<a href="/public/settings" class="btn">← Back to Settings</a>';
+    echo '<h2>Access denied</h2>';
+    echo '<p>An administrator account is required for backup and restore.</p>';
+    if (easycalf_debug_enabled()) {
+        echo '<pre>';
+        echo 'user_id: ' . htmlspecialchars((string) ($_SESSION['user_id'] ?? 'not set')) . "\n";
+        echo 'user_role: ' . htmlspecialchars((string) ($_SESSION['user_role'] ?? 'not set')) . "\n";
+        echo '</pre>';
+    }
+    echo '<a href="/public/settings" class="btn">Back to Settings</a>';
     echo '</div></body></html>';
     exit;
 }
-
-// Load database configuration
-define('BASE_PATH', dirname(__DIR__));
-require_once BASE_PATH . '/app/config/database.php';
 
 $action = $_GET['action'] ?? 'download';
 
